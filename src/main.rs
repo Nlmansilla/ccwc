@@ -1,7 +1,7 @@
 use std::env;
+use std::fmt::Write;
 use std::fs;
 use std::io;
-use std::fmt::Write;
 
 const FMT_DISPLAY_WIDTH: usize = 6;
 
@@ -12,6 +12,14 @@ enum CliOptions {
     CountLines,
     CountWords,
     MaxLineLength,
+}
+
+fn get_default_options() -> Vec<CliOptions> {
+    vec![
+        CliOptions::CountLines,
+        CliOptions::CountWords,
+        CliOptions::CountBytes,
+    ]
 }
 
 fn main() {
@@ -34,24 +42,13 @@ fn main() {
         }
     }
 
+    options = if options.is_empty() {
+        get_default_options()
+    } else {
+        options
+    };
 
-    if options.is_empty() {
-        options = vec![
-            CliOptions::CountLines,
-            CliOptions::CountWords,
-            CliOptions::CountBytes,
-        ];
-    }
-
-    if read_stdin || files.is_empty() {
-        let file = if read_stdin { "-" } else { "" };
-        let contents = io::read_to_string(io::stdin()).expect("Unable to read from stdin");
-        println!(
-            "{}{:>FMT_DISPLAY_WIDTH$}",
-            wc_format_output(&handle_wc_options(&contents, &options)),
-            file
-        );
-    }
+    handle_stdin_or_empty_file(read_stdin, &files, &options);
 
     let mut total: Vec<usize> = Vec::new();
 
@@ -64,7 +61,7 @@ fn main() {
                 String::new()
             };
 
-            let counts = handle_wc_options(&contents, &options);
+            let counts = process_wc_options(&contents, &options);
             println!("{}{:>FMT_DISPLAY_WIDTH$}", wc_format_output(&counts), file);
 
             if total.is_empty() {
@@ -76,13 +73,29 @@ fn main() {
             println!("ccwc: {}: No such file or directory", file);
         }
     }
+
+    print_total(&files, &total);
+}
+
+fn print_total(files: &Vec<String>, total: &Vec<usize>) {
     if files.len() > 1 {
         println!("{}total", wc_format_output(&total));
     }
-
 }
 
-fn handle_wc_options(contents: &String, options: &Vec<CliOptions>) -> Vec<usize> {
+fn handle_stdin_or_empty_file(read_stdin: bool, files: &Vec<String>, options: &Vec<CliOptions>) {
+    if read_stdin || files.is_empty() {
+        let file = if read_stdin { "-" } else { "" };
+        let contents = io::read_to_string(io::stdin()).expect("Unable to read from stdin");
+        println!(
+            "{}{:>FMT_DISPLAY_WIDTH$}",
+            wc_format_output(&process_wc_options(&contents, &options)),
+            file
+        );
+    }
+}
+
+fn process_wc_options(contents: &String, options: &Vec<CliOptions>) -> Vec<usize> {
     let mut counts: Vec<usize> = Vec::new();
 
     for option in options {
@@ -96,15 +109,16 @@ fn handle_wc_options(contents: &String, options: &Vec<CliOptions>) -> Vec<usize>
                     .map(|line| line.split_whitespace().count())
                     .sum(),
             ),
-            CliOptions::MaxLineLength =>  counts.push(contents.lines().map(|line| line.len()).max().unwrap_or(0)),
+            CliOptions::MaxLineLength => {
+                counts.push(contents.lines().map(|line| line.len()).max().unwrap_or(0))
+            }
         }
     }
 
     counts
-
 }
 
-fn add_input_files(option: &str, files: &mut Vec<String>){
+fn add_input_files(option: &str, files: &mut Vec<String>) {
     let (_, input) = option.split_at("--files0-from=".len());
     let contents = if input == "-" {
         io::read_to_string(io::stdin()).expect("Failed to read from stdin")
@@ -113,7 +127,6 @@ fn add_input_files(option: &str, files: &mut Vec<String>){
     };
     files.extend(contents.split('\0').map(String::from));
 }
-
 
 fn add_option(option: CliOptions, options: &mut Vec<CliOptions>) {
     options.push(option);
