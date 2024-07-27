@@ -1,98 +1,178 @@
 use std::env;
-use std::fs::File;
 use std::fs;
-use std::io::BufReader;
-use std::io::prelude::*;
+use std::io;
+use std::fmt::Write;
 
-#[derive(Debug)]
-struct Arguments {
-    filename: String,
-    options: String
+const FMT_DISPLAY_WIDTH: usize = 6;
+
+#[derive(Debug, Eq, Hash, PartialEq, Clone)]
+enum CliOptions {
+    CountBytes,
+    CountCharacters,
+    CountLines,
+    CountWords,
+    MaxLineLength,
 }
 
 fn main() {
-    let args: Vec<String> = env::args().skip(1).collect();
+    let mut files: Vec<String> = Vec::new();
+    let mut read_stdin = false;
+    let mut options: Vec<CliOptions> = Vec::new();
 
-    let mut opts = "-clm".to_string();
-
-    if args[1].chars().nth(0).unwrap() == '-' {
-        opts = args[1].clone()
+    for arg in env::args().skip(1).into_iter() {
+        match arg.as_str() {
+            "-c" | "--bytes" => add_option(CliOptions::CountBytes, &mut options),
+            "-m" | "--chars" => add_option(CliOptions::CountCharacters, &mut options),
+            "-l" | "--lines" => add_option(CliOptions::CountLines, &mut options),
+            "-L" | "--max_line_length" => add_option(CliOptions::MaxLineLength, &mut options),
+            "-w" | "--words" => add_option(CliOptions::CountWords, &mut options),
+            "-" => read_stdin = true,
+            "--help" => help(),
+            "--version" => version(),
+            s if s.starts_with("--files0-from=") => add_input_files(s, &mut files),
+            file => files.push(file.to_string()),
+        }
     }
 
-    let arguments: Arguments = Arguments {
-        filename: args[ args.len() -1 ].clone(),
-        options: opts
+
+    if options.is_empty() {
+        options = vec![
+            CliOptions::CountLines,
+            CliOptions::CountWords,
+            CliOptions::CountBytes,
+        ];
+    }
+
+    if read_stdin || files.is_empty() {
+        let file = if read_stdin { "-" } else { "" };
+        let contents = io::read_to_string(io::stdin()).expect("Unable to read from stdin");
+        println!(
+            "{}{:>FMT_DISPLAY_WIDTH$}",
+            wc_format_output(&handle_wc_options(&contents, &options)),
+            file
+        );
+    }
+
+    let mut total: Vec<usize> = Vec::new();
+
+    for file in files.iter() {
+        if let Ok(metadata) = fs::metadata(file) {
+            let contents = if metadata.is_file() {
+                fs::read_to_string(file).expect(&format!("unable to read {}", file))
+            } else {
+                println!("ccwc {} is a directory", file);
+                String::new()
+            };
+
+            let counts = handle_wc_options(&contents, &options);
+            println!("{}{:>FMT_DISPLAY_WIDTH$}", wc_format_output(&counts), file);
+
+            if total.is_empty() {
+                total = counts;
+            } else {
+                total = total.iter().zip(&counts).map(|(&t, &c)| t + c).collect();
+            }
+        } else {
+            println!("ccwc: {}: No such file or directory", file);
+        }
+    }
+    if files.len() > 1 {
+        println!("{}total", wc_format_output(&total));
+    }
+
+}
+
+fn handle_wc_options(contents: &String, options: &Vec<CliOptions>) -> Vec<usize> {
+    let mut counts: Vec<usize> = Vec::new();
+
+    for option in options {
+        match option {
+            CliOptions::CountBytes => counts.push(contents.bytes().len()),
+            CliOptions::CountCharacters => counts.push(contents.chars().count()),
+            CliOptions::CountLines => counts.push(contents.lines().count()),
+            CliOptions::CountWords => counts.push(
+                contents
+                    .lines()
+                    .map(|line| line.split_whitespace().count())
+                    .sum(),
+            ),
+            CliOptions::MaxLineLength =>  counts.push(contents.lines().map(|line| line.len()).max().unwrap_or(0)),
+        }
+    }
+
+    counts
+
+}
+
+fn add_input_files(option: &str, files: &mut Vec<String>){
+    let (_, input) = option.split_at("--files0-from=".len());
+    let contents = if input == "-" {
+        io::read_to_string(io::stdin()).expect("Failed to read from stdin")
+    } else {
+        fs::read_to_string(input).expect(&format!("Failed to read from {}", input))
     };
-    
-    let mut answer: String = "".to_owned();
+    files.extend(contents.split('\0').map(String::from));
+}
 
-    
 
-    for caracter in arguments.options.chars().skip(1) {
-        match caracter {
-            'c' =>  answer.push_str(&get_bytes_count(&arguments.filename).to_string()),
-            'l' => answer.push_str(&(" ".to_owned() + &get_lines_count(&arguments.filename).to_string())),
-            'w' => answer.push_str(&(" ".to_owned() + &get_words_count(&arguments.filename).to_string())),
-            'm' => answer.push_str(&(" ".to_owned() + &get_characters_count(&arguments.filename).to_string())),
-            _ => ()
-        }
+fn add_option(option: CliOptions, options: &mut Vec<CliOptions>) {
+    options.push(option);
+    options.dedup();
+}
+
+fn wc_format_output(counts: &Vec<usize>) -> String {
+    let mut fmt = String::new();
+    let width = if counts.len() > 1 {
+        FMT_DISPLAY_WIDTH
+    } else {
+        0
+    };
+    for count in counts {
+        write!(fmt, "{:>width$} ", count).expect("Failed to write bytes");
     }
-
-    answer.push_str( &(" ".to_owned() + &arguments.filename) );
-
-    println!("{:?}", answer);
+    fmt
 }
 
-fn get_bytes_count(filename: &String) -> usize{
-    let file = File::open("./".to_owned() + filename).unwrap();
-    let mut reader = BufReader::with_capacity(512, file);
+fn version() {
+    println!(
+        r#"ccwc 0.1.0
+Copyright (C) 2024 <nlmansilla89@gmail.com>
+License MIT: The MIT License <https://opensource.org/license/mit>
+This is free software: you are free to change and redistribute it.
+The software is provided “as is”, without warranty of any kind.
 
-    let mut total_bytes_in_file = 0;
-    loop {
-        let buffer = reader.fill_buf().unwrap();
-        let buffer_length: usize = buffer.len();
-
-        // No hay más bytes para leer.
-        if buffer_length == 0 {
-            break;
-        }
-
-        // Procesa los bytes leídos aquí.
-        //println!("{:?}",buffer_length);
-        total_bytes_in_file += buffer_length;
-
-        // Consumir todos los bytes del buffer.
-        reader.consume(buffer_length);
-    }
-
-    total_bytes_in_file
+Written by Nicolas Mansilla"#
+    );
 }
 
-fn get_lines_count(filename: &String) -> usize {
-    let file = File::open("./".to_owned() + filename).unwrap();
-    let reader = BufReader::new(file);
+fn help() {
+    println!(
+        r#"ccwc - print newline, word, and byte counts for each file
 
-    reader.lines().count()
-}
+Usage: ccwc [OPTIONS]... [FILE]...
+   or: ccwc [OPTIONS]... --file0-from=F
 
-fn get_words_count(filename: &String) -> usize {
-    let file = File::open("./".to_owned() + filename).unwrap();
-    let reader = BufReader::new(file);
+Description:
 
-    let mut total_words: usize = 0;
+Print newline, word and byte counts for each FILE, and total line
+if more than one FILE is specified. A word is a non-zero-length sequence
+of characters delimited by white space.
 
-    for line in reader.lines() {
-        total_words += line.unwrap().split_whitespace().count();
-    }
+With no FILE or when FILE is - read standard input
 
-    total_words
-}
+The options below may be used to select which counts are printed, always 
+in the following order: newline, word, character, byte, maximum line length.
 
-fn get_characters_count(filename: &String) -> usize {
-
-    let total_characters: usize = fs::read_to_string(
-        "./".to_owned() + filename
-    ).unwrap().chars().count();
-
-    total_characters
+Options: 
+    -c, --bytes             Print the byte counts
+    -m, --chars             Print the character counts
+    -l, --lines             Print the newline counts
+        --files0-from=F     Read input from the files specified by
+                              NUL-terminated names in file F;
+                              If F is - then read names from standard input
+    -L, --max-line-length   Print the maximum display width
+    -w, --words             Print the word counts
+        --help              Display this help and exit 
+        --version           Output version information and exit"#
+    )
 }
