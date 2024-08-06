@@ -23,9 +23,9 @@ fn get_default_options() -> Vec<CliOptions> {
 }
 
 fn main() {
-    let mut files: Vec<String> = Vec::new();
+    let mut files: Vec<String> = vec![];
     let mut read_stdin = false;
-    let mut options: Vec<CliOptions> = Vec::new();
+    let mut options: Vec<CliOptions> = vec![];
 
     for arg in env::args().skip(1).into_iter() {
         match arg.as_str() {
@@ -50,7 +50,7 @@ fn main() {
 
     handle_stdin_or_empty_file(read_stdin, &files, &options);
 
-    let mut total: Vec<usize> = Vec::new();
+    let mut total: Vec<usize> = vec![];
 
     for file in files.iter() {
         if let Ok(metadata) = fs::metadata(file) {
@@ -58,7 +58,7 @@ fn main() {
                 fs::read_to_string(file).expect(&format!("unable to read {}", file))
             } else {
                 println!("ccwc {} is a directory", file);
-                String::new()
+                "".to_string()
             };
 
             let counts = process_wc_options(&contents, &options);
@@ -96,7 +96,7 @@ fn handle_stdin_or_empty_file(read_stdin: bool, files: &Vec<String>, options: &V
 }
 
 fn process_wc_options(contents: &String, options: &Vec<CliOptions>) -> Vec<usize> {
-    let mut counts: Vec<usize> = Vec::new();
+    let mut counts: Vec<usize> = vec![];
 
     for option in options {
         match option {
@@ -134,7 +134,7 @@ fn add_option(option: CliOptions, options: &mut Vec<CliOptions>) {
 }
 
 fn wc_format_output(counts: &Vec<usize>) -> String {
-    let mut fmt = String::new();
+    let mut fmt = "".to_string();
     let width = if counts.len() > 1 {
         FMT_DISPLAY_WIDTH
     } else {
