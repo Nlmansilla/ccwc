@@ -2,6 +2,7 @@ use std::env;
 use std::fmt::Write;
 use std::fs;
 use std::io;
+use std::io::BufRead;
 
 const FMT_DISPLAY_WIDTH: usize = 6;
 
@@ -23,6 +24,7 @@ fn get_default_options() -> Vec<CliOptions> {
 }
 
 fn main() {
+    //TODO: Optimize reading line by line instead of reading in memory
     let mut files: Vec<String> = vec![];
     let mut read_stdin = false;
     let mut options: Vec<CliOptions> = vec![];
@@ -60,7 +62,7 @@ fn main() {
                 println!("ccwc {} is a directory", file);
                 "".to_string()
             };
-
+        
             let counts = process_wc_options(&contents, &options);
             println!("{}{:>FMT_DISPLAY_WIDTH$}", wc_format_output(&counts), file);
 
@@ -86,10 +88,19 @@ fn print_total(files: &Vec<String>, total: &Vec<usize>) {
 fn handle_stdin_or_empty_file(read_stdin: bool, files: &Vec<String>, options: &Vec<CliOptions>) {
     if read_stdin || files.is_empty() {
         let file = if read_stdin { "-" } else { "" };
-        let contents = io::read_to_string(io::stdin()).expect("Unable to read from stdin");
-        println!(
+        let mut counts: Vec<usize> = vec![0; options.len()];
+        while let Some(line) = io::stdin().lock().lines().next() {
+             let partial: Vec<usize> = process_wc_options(&line.unwrap(), &options);
+             
+             let mut index = 0;
+             for number in partial.iter() {
+                counts[index] += number;
+                index += 1;
+             }
+        }
+            println!(
             "{}{:>FMT_DISPLAY_WIDTH$}",
-            wc_format_output(&process_wc_options(&contents, &options)),
+            wc_format_output(&counts),
             file
         );
     }
