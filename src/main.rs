@@ -1,8 +1,10 @@
 use std::env;
 use std::fmt::Write;
 use std::fs;
+use std::fs::File;
 use std::io;
-use std::io::BufRead;
+use std::io::{prelude::*, BufReader};
+
 
 const FMT_DISPLAY_WIDTH: usize = 6;
 
@@ -24,7 +26,6 @@ fn get_default_options() -> Vec<CliOptions> {
 }
 
 fn main() {
-    //TODO: Optimize reading line by line instead of reading in memory
     let mut files: Vec<String> = vec![];
     let mut read_stdin = false;
     let mut options: Vec<CliOptions> = vec![];
@@ -56,14 +57,38 @@ fn main() {
 
     for file in files.iter() {
         if let Ok(metadata) = fs::metadata(file) {
-            let contents = if metadata.is_file() {
-                fs::read_to_string(file).expect(&format!("unable to read {}", file))
+            let mut counts: Vec<usize> = vec![0; options.len()];
+            if metadata.is_file() {
+                let file = File::open(file).unwrap();
+                let mut reader = BufReader::new(file);
+                let mut str = String::new();
+    
+                while match reader.read_line(&mut str) {
+                    Ok(0) => {
+                        //EOF reached
+                        false
+                    },
+                    Ok(_) => {
+                        let partial: Vec<usize> = process_wc_options(&str, &options);
+                        let mut index = 0;
+                        for number in partial.iter() {
+                            counts[index] += number;
+                            index += 1;
+                        }
+                        str.clear();
+                        true
+                    },
+                    Err(e) => {
+                        eprintln!("Error reading line: {}", e);
+                        false
+                    },
+                } {}
+                
             } else {
                 println!("ccwc {} is a directory", file);
-                "".to_string()
+                counts = process_wc_options(&"".to_string(), &options);
             };
         
-            let counts = process_wc_options(&contents, &options);
             println!("{}{:>FMT_DISPLAY_WIDTH$}", wc_format_output(&counts), file);
 
             if total.is_empty() {
@@ -89,16 +114,30 @@ fn handle_stdin_or_empty_file(read_stdin: bool, files: &Vec<String>, options: &V
     if read_stdin || files.is_empty() {
         let file = if read_stdin { "-" } else { "" };
         let mut counts: Vec<usize> = vec![0; options.len()];
-        while let Some(line) = io::stdin().lock().lines().next() {
-             let partial: Vec<usize> = process_wc_options(&line.unwrap(), &options);
-             
-             let mut index = 0;
-             for number in partial.iter() {
-                counts[index] += number;
-                index += 1;
-             }
-        }
-            println!(
+        let mut stdin = io::stdin().lock();
+        let mut line = String::new();
+        while match stdin.read_line(&mut line) {
+            Ok(0) => {
+                // EOF reached
+                false
+            },
+            Ok(_) => {
+                let partial: Vec<usize> = process_wc_options(&line, &options);
+                let mut index = 0;
+                for number in partial.iter() {
+                    counts[index] += number;
+                    index += 1;
+                }
+                line.clear();
+                true
+            },
+            Err(e) => {
+                eprintln!("Error reading line: {}", e);
+                false
+            }
+        } { }
+
+        println!(
             "{}{:>FMT_DISPLAY_WIDTH$}",
             wc_format_output(&counts),
             file
